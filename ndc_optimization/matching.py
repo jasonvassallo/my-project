@@ -1,4 +1,5 @@
 """Matching logic between injectable items and facility purchase orders."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,7 +9,12 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 from rapidfuzz import fuzz
 
-from .parsing import DrugComponents, build_match_string, normalize_ndc, parse_drug_components
+from .parsing import (
+    DrugComponents,
+    build_match_string,
+    normalize_ndc,
+    parse_drug_components,
+)
 from .rxnav import RxNavClient
 
 
@@ -53,7 +59,9 @@ class DrugMatcher:
         self.fuzzy_threshold = fuzzy_threshold
         self.facility_records = self._prepare_facility_records(facility_data)
 
-    def _prepare_facility_records(self, facility_data: Dict[str, pd.DataFrame]) -> Dict[str, List[FacilityRecord]]:
+    def _prepare_facility_records(
+        self, facility_data: Dict[str, pd.DataFrame]
+    ) -> Dict[str, List[FacilityRecord]]:
         records: Dict[str, List[FacilityRecord]] = {}
         for facility, frame in facility_data.items():
             facility_rows: List[FacilityRecord] = []
@@ -64,7 +72,9 @@ class DrugMatcher:
                 if self.rxnav and ndc11 and not components.dosage_form:
                     enriched = self.rxnav.lookup(ndc11)
                     if enriched:
-                        components.dosage_form = enriched.dosage_form or components.dosage_form
+                        components.dosage_form = (
+                            enriched.dosage_form or components.dosage_form
+                        )
                         if not components.strength and enriched.strength:
                             components.strength = enriched.strength
                 match_string = build_match_string(components)
@@ -84,7 +94,9 @@ class DrugMatcher:
             records[facility] = facility_rows
         return records
 
-    def _ndc_match(self, ndc11: Optional[str], facility_rows: Iterable[FacilityRecord]) -> List[FacilityRecord]:
+    def _ndc_match(
+        self, ndc11: Optional[str], facility_rows: Iterable[FacilityRecord]
+    ) -> List[FacilityRecord]:
         if not ndc11:
             return []
         return [row for row in facility_rows if row.ndc11 == ndc11]
@@ -104,7 +116,11 @@ class DrugMatcher:
         candidates.sort(key=lambda item: item[1], reverse=True)
         return candidates
 
-    def _format_match(self, ndc_records: List[FacilityRecord], fuzzy_records: List[Tuple[FacilityRecord, int]]) -> str:
+    def _format_match(
+        self,
+        ndc_records: List[FacilityRecord],
+        fuzzy_records: List[Tuple[FacilityRecord, int]],
+    ) -> str:
         if ndc_records:
             ndcs = {rec.ndc11 for rec in ndc_records if rec.ndc11}
             summary = ", ".join(sorted(ndcs))
@@ -135,7 +151,9 @@ class DrugMatcher:
             if self.rxnav and ndc11 and not components.dosage_form:
                 enriched = self.rxnav.lookup(ndc11)
                 if enriched:
-                    components.dosage_form = enriched.dosage_form or components.dosage_form
+                    components.dosage_form = (
+                        enriched.dosage_form or components.dosage_form
+                    )
                     if not components.strength and enriched.strength:
                         components.strength = enriched.strength
             match_string = build_match_string(components)
@@ -153,8 +171,14 @@ class DrugMatcher:
                         )
                     ]
                 ndc_records = self._ndc_match(ndc11, facility_rows)
-                fuzzy_records = self._name_match(match_string, facility_rows) if not ndc_records else []
-                facility_matches[facility] = self._format_match(ndc_records, fuzzy_records)
+                fuzzy_records = (
+                    self._name_match(match_string, facility_rows)
+                    if not ndc_records
+                    else []
+                )
+                facility_matches[facility] = self._format_match(
+                    ndc_records, fuzzy_records
+                )
             report_rows.append(
                 ReportRow(
                     drug_text=description,

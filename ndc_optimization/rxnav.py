@@ -1,4 +1,5 @@
 """Thin wrapper around the public RxNav API for on-demand NDC lookups."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
