@@ -1,0 +1,111 @@
+name: Claude Code
+
+# Two Claude review paths on this repo:
+#   • claude-auto-review — HANDS-OFF: reviews every non-draft PR automatically on
+#     open / update / ready-for-review (no @claude needed) via an explicit
+#     review `prompt`.
+#   • claude — ON-DEMAND: responds to "@claude ..." comments for follow-ups,
+#     re-reviews, or agentic tasks.
+# Public repo: fork PRs are skipped by the head.repo guard — forks can't read
+# the OAuth-token secret anyway, so skipping is fail-closed rather than a
+# failed run. @claude mentions are gated by claude-code-action's own
+# write-access check on the commenter, so drive-by comments can't spend tokens.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+# Cancel a superseded auto-review when a new commit is pushed to the same PR.
+# pull_request events key per-PR number (so a new push cancels the stale run);
+# comment events fall back to a unique run_id so concurrent @claude responses
+# never cancel each other.
+concurrency:
+  group: claude-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # On-demand: only when someone writes "@claude ..." in a PR or issue comment.
+  claude:
+    if: |
+      github.event_name == 'issue_comment' &&
+      contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write # required by claude-code-action to fetch its OIDC token
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+
+  # Hands-off auto-review: runs on every non-draft PR open/update with an
+  # explicit review `prompt`, so no @claude comment is needed. Kept SEPARATE
+  # from the `claude` job above so the @mention/agent flow still works, and so
+  # the two never double-fire (mutually exclusive event-type guards).
+  claude-auto-review:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write # required by claude-code-action to fetch its OIDC token
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Claude auto-review
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # track_progress + the inline-comment tool below post inline review
+          # comments (the supported pairing from the @v1 pr-review examples).
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            The PR branch is checked out in the working directory. Review ONLY
+            the changes in this pull request's diff. Focus on:
+
+            1. Bugs & correctness — logic errors, unhandled edge cases,
+               broken control flow, and incorrect data handling in the
+               ndc_optimization package.
+            2. Security — input validation, path traversal, shell injection,
+               leaked secrets, unsafe deserialization, missing HTTP status
+               checks, and Dockerfile hardening (non-root user, pinned base
+               images). This project treats security as the highest priority.
+            3. Repo conventions — specific-exception-only error handling,
+               least-privilege defaults, and a reproducible environment
+               (environment.yml pins consistent with the code).
+
+            Post specific issues as INLINE review comments on the exact lines.
+            Put general observations in your tracking comment instead of
+            running gh pr comment. Be concise; do not restate unchanged code.
+          # Grant the inline-comment tool + read-only gh PR commands. Deliberately
+          # NO Bash(gh pr comment:*): its wildcard would let prompt-injected diff
+          # content ask for `--body "$(printenv ...)"`, shell-expanding the
+          # workflow's secrets into a public PR comment. The MCP inline-comment
+          # tool takes literal strings, so it has no expansion sink; general
+          # remarks go in the track_progress sticky comment.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
