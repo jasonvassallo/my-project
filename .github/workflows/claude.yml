@@ -27,10 +27,14 @@ concurrency:
 
 jobs:
   # On-demand: only when someone writes "@claude ..." in a PR or issue comment.
+  # The author_association guard is defense-in-depth on this public repo: the
+  # action already rejects commenters without write access, but gating at the
+  # job level skips the runner spin-up entirely for drive-by comments.
   claude:
     if: |
       github.event_name == 'issue_comment' &&
-      contains(github.event.comment.body, '@claude')
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,5 +111,10 @@ jobs:
           # workflow's secrets into a public PR comment. The MCP inline-comment
           # tool takes literal strings, so it has no expansion sink; general
           # remarks go in the track_progress sticky comment.
+          # track_progress forces tag mode, which auto-grants git add/commit/rm
+          # and a push wrapper (write-capable). Deny rules take precedence over
+          # allow rules, so the explicit --disallowedTools below keeps this
+          # review job read-only without breaking the sticky-comment flow.
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --disallowedTools "Bash(git add:*),Bash(git commit:*),Bash(git rm:*),Bash(git push:*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
