@@ -1,0 +1,157 @@
+name: Claude Code
+
+# Two Claude review paths on this repo:
+#   • claude-auto-review — HANDS-OFF: reviews every non-draft PR automatically on
+#     open / update / ready-for-review (no @claude needed) via an explicit
+#     review `prompt`.
+#   • claude — ON-DEMAND: responds to "@claude ..." comments for follow-ups,
+#     re-reviews, or agentic tasks.
+# Public repo: fork PRs are skipped by the head.repo guard — forks can't read
+# the OAuth-token secret anyway, so skipping is fail-closed rather than a
+# failed run. @claude mentions are gated by claude-code-action's own
+# write-access check on the commenter, so drive-by comments can't spend tokens.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+# Cancel a superseded auto-review when a new commit is pushed to the same PR.
+# pull_request events key per-PR number (so a new push cancels the stale run);
+# comment events fall back to a unique run_id so concurrent @claude responses
+# never cancel each other.
+concurrency:
+  group: claude-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # On-demand: only when a collaborator writes "@claude ..." on a PR. Plain
+  # issues are excluded: their bodies are stranger-authored on a public repo,
+  # and this job runs Claude agentically (full tools) — untrusted issue text
+  # would flow straight into that context. The author_association guard is
+  # defense-in-depth over the action's own write-access check and skips the
+  # runner spin-up entirely for drive-by comments.
+  claude:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write # required by claude-code-action to fetch its OIDC token
+      actions: read
+    steps:
+      # Fail-closed fork guard: @claude on a fork PR would have the action
+      # fetch untrusted head content into a full-Bash agentic run with the
+      # OAuth token in env. The commenter gate doesn't cover that (a
+      # maintainer can be lured into tagging a malicious fork PR), so block
+      # before any untrusted content is fetched.
+      - name: Block agentic runs on fork PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          HEAD_REPO=$(gh pr view "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --json headRepositoryOwner,headRepository \
+            --jq '.headRepositoryOwner.login + "/" + .headRepository.name')
+          if [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
+            echo "::error::@claude agentic runs are disabled on fork PRs."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API-based commit signing keeps the exchanged app token out of the
+          # workspace: without it, tag mode writes the token into the origin
+          # remote URL or a helper script, both readable from inside the run.
+          use_commit_signing: true
+          additional_permissions: |
+            actions: read
+
+  # Hands-off auto-review: runs on every non-draft PR open/update with an
+  # explicit review `prompt`, so no @claude comment is needed. Kept SEPARATE
+  # from the `claude` job above so the @mention/agent flow still works, and so
+  # the two never double-fire (mutually exclusive event-type guards).
+  claude-auto-review:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write # required by claude-code-action to fetch its OIDC token
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Claude auto-review
+        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API-based commit signing makes tag mode skip configureGitAuth, so
+          # the exchanged app token is never written into the workspace (the
+          # non-signing path embeds it in the origin remote URL, readable by
+          # the Read tool). The API file-ops tools it switches to are already
+          # in the deny list below, so review runs still cannot commit.
+          use_commit_signing: true
+          # track_progress + the inline-comment tool below post inline review
+          # comments (the supported pairing from the @v1 pr-review examples).
+          # use_sticky_comment reuses one progress comment across synchronize
+          # runs instead of stacking a new one per push (defaults to false).
+          track_progress: true
+          use_sticky_comment: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            The PR branch is checked out in the working directory. Review ONLY
+            the changes in this pull request's diff. Focus on:
+
+            1. Bugs & correctness — logic errors, unhandled edge cases,
+               broken control flow, and incorrect data handling in the
+               ndc_optimization package.
+            2. Security — input validation, path traversal, shell injection,
+               leaked secrets, unsafe deserialization, missing HTTP status
+               checks, and Dockerfile hardening (non-root user, pinned base
+               images). This project treats security as the highest priority.
+            3. Repo conventions — specific-exception-only error handling,
+               least-privilege defaults, and a reproducible environment
+               (environment.yml pins consistent with the code).
+
+            Post specific issues as INLINE review comments on the exact lines.
+            Put general observations in your tracking comment. You have no
+            shell: read files directly with your file tools. Be concise; do
+            not restate unchanged code.
+          # Claude gets NO Bash at all in this job. The OAuth token necessarily
+          # lives in the subprocess env, and even "read-only" shell commands
+          # (echo/cat/env) could be prompt-injected into echoing it for posting
+          # through the comment tools — so the shell itself is the sink, not
+          # any particular command. Tag mode already injects Read/Grep/Glob/LS
+          # for reviewing the checked-out branch, and persist-credentials:
+          # false keeps the git remote token-free. Deny rules win over allow
+          # rules, so the git/file-ops write tools tag mode auto-grants are
+          # dead code here too.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+            --disallowedTools "Bash,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
