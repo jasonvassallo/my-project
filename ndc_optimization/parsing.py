@@ -1,4 +1,5 @@
 """Parsing helpers for drug name/strength/dosage form fields."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Command line entry point for generating the NDC monthly report."""
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +16,9 @@ from ndc_optimization.rxnav import RxNavClient
 
 def _parse_po_argument(value: str) -> Tuple[str, Path, Optional[str]]:
     if "=" not in value:
-        raise argparse.ArgumentTypeError("PO file arguments must be in FACILITY=path[::sheet] format")
+        raise argparse.ArgumentTypeError(
+            "PO file arguments must be in FACILITY=path[::sheet] format"
+        )
     facility, payload = value.split("=", 1)
     sheet = None
     path_text = payload
@@ -33,7 +36,9 @@ def _load_table(path: Path, sheet: Optional[str]) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def _determine_date_range(month: Optional[str], start: Optional[str], end: Optional[str]) -> Tuple[Optional[datetime], Optional[datetime]]:
+def _determine_date_range(
+    month: Optional[str], start: Optional[str], end: Optional[str]
+) -> Tuple[Optional[datetime], Optional[datetime]]:
     if month:
         try:
             start_dt = datetime.strptime(month + "-01", "%Y-%m-%d")
@@ -51,22 +56,84 @@ def _determine_date_range(month: Optional[str], start: Optional[str], end: Optio
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate the NDC monthly report")
-    parser.add_argument("--injectable-workbook", required=True, help="Path to the Excel workbook that contains the Injectable tab")
-    parser.add_argument("--injectable-sheet", default="Injectable", help="Sheet name that holds the Injectable data")
-    parser.add_argument("--injectable-description-column", default="Drug Name / Strength / Dosage Form", help="Column name for the free text description in the Injectable sheet")
-    parser.add_argument("--injectable-ndc-column", default="NDC", help="Column that stores the NDC for Injectable items")
-    parser.add_argument("--comments-column", default="Comments", help="Column that stores analyst comments")
-    parser.add_argument("--po-file", action="append", type=_parse_po_argument, required=True, help="Facility purchase order file in FACILITY=path[::sheet] format. Repeat for each facility.")
-    parser.add_argument("--po-description-column", default="Drug Name / Strength / Dosage Form", help="Column containing the drug description within facility PO files")
-    parser.add_argument("--po-ndc-column", default="NDC", help="Column containing the NDC within facility PO files")
-    parser.add_argument("--po-date-column", default="PO Processing Date", help="Date column used for filtering facility PO history")
+    parser.add_argument(
+        "--injectable-workbook",
+        required=True,
+        help="Path to the Excel workbook that contains the Injectable tab",
+    )
+    parser.add_argument(
+        "--injectable-sheet",
+        default="Injectable",
+        help="Sheet name that holds the Injectable data",
+    )
+    parser.add_argument(
+        "--injectable-description-column",
+        default="Drug Name / Strength / Dosage Form",
+        help="Column name for the free text description in the Injectable sheet",
+    )
+    parser.add_argument(
+        "--injectable-ndc-column",
+        default="NDC",
+        help="Column that stores the NDC for Injectable items",
+    )
+    parser.add_argument(
+        "--comments-column",
+        default="Comments",
+        help="Column that stores analyst comments",
+    )
+    parser.add_argument(
+        "--po-file",
+        action="append",
+        type=_parse_po_argument,
+        required=True,
+        help="Facility purchase order file in FACILITY=path[::sheet] format. Repeat for each facility.",
+    )
+    parser.add_argument(
+        "--po-description-column",
+        default="Drug Name / Strength / Dosage Form",
+        help="Column containing the drug description within facility PO files",
+    )
+    parser.add_argument(
+        "--po-ndc-column",
+        default="NDC",
+        help="Column containing the NDC within facility PO files",
+    )
+    parser.add_argument(
+        "--po-date-column",
+        default="PO Processing Date",
+        help="Date column used for filtering facility PO history",
+    )
     parser.add_argument("--month", help="Month to evaluate in YYYY-MM format")
-    parser.add_argument("--start-date", help="Optional ISO formatted start date (overrides --month when provided)")
-    parser.add_argument("--end-date", help="Optional ISO formatted end date (overrides --month when provided)")
-    parser.add_argument("--output", default="ndc_monthly_report.xlsx", help="Where to write the resulting report")
-    parser.add_argument("--output-format", choices=["excel", "csv"], default="excel", help="Output format")
-    parser.add_argument("--fuzzy-threshold", type=int, default=88, help="Minimum token-set ratio for fallback name matches")
-    parser.add_argument("--enable-rxnav", action="store_true", help="Use the RxNav API to enrich missing dosage forms/strengths when NDC is present")
+    parser.add_argument(
+        "--start-date",
+        help="Optional ISO formatted start date (overrides --month when provided)",
+    )
+    parser.add_argument(
+        "--end-date",
+        help="Optional ISO formatted end date (overrides --month when provided)",
+    )
+    parser.add_argument(
+        "--output",
+        default="ndc_monthly_report.xlsx",
+        help="Where to write the resulting report",
+    )
+    parser.add_argument(
+        "--output-format",
+        choices=["excel", "csv"],
+        default="excel",
+        help="Output format",
+    )
+    parser.add_argument(
+        "--fuzzy-threshold",
+        type=int,
+        default=88,
+        help="Minimum token-set ratio for fallback name matches",
+    )
+    parser.add_argument(
+        "--enable-rxnav",
+        action="store_true",
+        help="Use the RxNav API to enrich missing dosage forms/strengths when NDC is present",
+    )
     return parser
 
 
@@ -94,7 +161,9 @@ def main() -> None:
         fuzzy_threshold=args.fuzzy_threshold,
     )
 
-    start_date, end_date = _determine_date_range(args.month, args.start_date, args.end_date)
+    start_date, end_date = _determine_date_range(
+        args.month, args.start_date, args.end_date
+    )
 
     report_rows = matcher.build_report(
         injectable_df,
