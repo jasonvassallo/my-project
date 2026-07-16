@@ -26,16 +26,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # On-demand: only when someone writes "@claude ..." in a PR or issue comment.
-  # The author_association guard is defense-in-depth on this public repo: the
-  # action already rejects commenters without write access, but gating at the
-  # job level skips the runner spin-up entirely for drive-by comments.
+  # On-demand: only when a collaborator writes "@claude ..." on a PR. Plain
+  # issues are excluded: their bodies are stranger-authored on a public repo,
+  # and this job runs Claude agentically (full tools) — untrusted issue text
+  # would flow straight into that context. The author_association guard is
+  # defense-in-depth over the action's own write-access check and skips the
+  # runner spin-up entirely for drive-by comments.
   claude:
     if: |
       github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
       contains(github.event.comment.body, '@claude') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -47,10 +51,8 @@ jobs:
       # fetch untrusted head content into a full-Bash agentic run with the
       # OAuth token in env. The commenter gate doesn't cover that (a
       # maintainer can be lured into tagging a malicious fork PR), so block
-      # before any untrusted content is fetched. Plain issues pass through —
-      # issue-driven @claude tasks are intentional and have no fork head.
+      # before any untrusted content is fetched.
       - name: Block agentic runs on fork PRs
-        if: github.event.issue.pull_request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -73,6 +75,10 @@ jobs:
         uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API-based commit signing keeps the exchanged app token out of the
+          # workspace: without it, tag mode writes the token into the origin
+          # remote URL or a helper script, both readable from inside the run.
+          use_commit_signing: true
           additional_permissions: |
             actions: read
 
@@ -87,6 +93,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -102,6 +109,12 @@ jobs:
         uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API-based commit signing makes tag mode skip configureGitAuth, so
+          # the exchanged app token is never written into the workspace (the
+          # non-signing path embeds it in the origin remote URL, readable by
+          # the Read tool). The API file-ops tools it switches to are already
+          # in the deny list below, so review runs still cannot commit.
+          use_commit_signing: true
           # track_progress + the inline-comment tool below post inline review
           # comments (the supported pairing from the @v1 pr-review examples).
           # use_sticky_comment reuses one progress comment across synchronize
