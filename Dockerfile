@@ -3,6 +3,9 @@ VOLUME /tmp
 ARG JAVA_OPTS
 ENV JAVA_OPTS=$JAVA_OPTS
 COPY myproject.jar myproject.jar
+# Run as a dedicated non-root user (Semgrep: missing-user-entrypoint).
+RUN addgroup -S app && adduser -S -G app app
+USER app
 EXPOSE 3000
 ENTRYPOINT exec java $JAVA_OPTS -jar myproject.jar
 # For Spring-Boot project, use the entrypoint below to reduce Tomcat startup time.
