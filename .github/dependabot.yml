@@ -10,3 +10,6 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+   # Wait 7 days before proposing new releases (Semgrep: dependabot-missing-cooldown).
+   cooldown:
+     default-days: 7
