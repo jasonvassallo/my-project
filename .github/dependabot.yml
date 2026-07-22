@@ -10,3 +10,8 @@ updates:
    directory: "/"
    schedule:
      interval: weekly
+   # NOTE: no `cooldown:` block here — the devcontainers ecosystem does NOT
+   # support cooldown (GitHub docs, dependabot-options-reference support
+   # table, verified 2026-07-22). The Semgrep dependabot-missing-cooldown
+   # finding is therefore unsatisfiable for this repo: accept-ignore it in
+   # the dashboard.
